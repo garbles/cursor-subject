@@ -2,102 +2,115 @@ import {CursorSubject} from '../CursorSubject'
 
 import 'rxjs/add/operator/take'
 
-describe(`Cursor`, () => {
-  it(`is a subject`, done => {
-    const initial = {a: 1}
-    const next = {a: 2}
-    const cursor = CursorSubject.create(initial)
+const rand = ::Math.random
 
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, initial)
-    })
+function assertValue (subject, expected, done) {
+  let wasChecked = false
 
-    cursor.next({a: 2})
-
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, next)
+  subject.take(1).subscribe(val => {
+    assert.deepEqual(val, expected)
+    wasChecked = true
+    if (done) {
       done()
-    })
+    }
   })
 
-  it(`can refine itself to get a nested value`, done => {
-    const initial = {a: {b: 1}}
-    const next = {a: {b: 2}}
-    const cursor = CursorSubject.create(initial)
-    const refined = cursor.refine(`a`)
+  if (!wasChecked) {
+    throw new Error(`Cursor did not return sync value. Could not check.`)
+  }
+}
 
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, initial.a)
-    })
+describe(`Cursor`, () => {
+  it(`is a subject`, done => {
+    const initial = {a: rand()}
+    const next = {a: rand()}
+    const cursor = CursorSubject.create(initial)
+
+    assertValue(cursor, initial)
 
     cursor.next(next)
 
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, next.a)
-      done()
-    })
+    assertValue(cursor, next, done)
+  })
+
+  it(`can refine itself to get a nested value`, done => {
+    const initial = {a: {b: rand()}}
+    const next = {a: {b: rand()}}
+    const cursor = CursorSubject.create(initial)
+    const refined = cursor.refine(`a`)
+
+    assertValue(refined, initial.a)
+
+    cursor.next(next)
+
+    assertValue(refined, next.a, done)
   })
 
   it(`can push new values on to the refined value and update the parent`, () => {
-    const initial = {a: {b: 1}}
-    const next = {a: {b: 2}}
-    const last = {a: {b: 3}}
+    const initial = {a: {b: rand()}}
+    const next = {a: {b: rand()}}
+    const last = {a: {b: rand()}}
+    const fin = {a: {b: rand()}}
     const cursor = CursorSubject.create(initial)
     const refined = cursor.refine(`a`)
     const doubleRefined = refined.refine(`b`)
 
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, initial)
-    })
-
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, initial.a)
-    })
-
-    doubleRefined.take(1).subscribe(val => {
-      assert.deepEqual(val, 1)
-    })
+    assertValue(cursor, initial)
+    assertValue(refined, initial.a)
+    assertValue(doubleRefined, initial.a.b)
 
     refined.next(next.a)
 
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, next)
-    })
-
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, next.a)
-    })
-
-    doubleRefined.take(1).subscribe(val => {
-      assert.deepEqual(val, 2)
-    })
+    assertValue(cursor, next)
+    assertValue(refined, next.a)
+    assertValue(doubleRefined, next.a.b)
 
     refined.next(last.a)
 
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, last)
+    assertValue(cursor, last)
+    assertValue(refined, last.a)
+    assertValue(doubleRefined, last.a.b)
+
+    doubleRefined.next(fin.a.b)
+
+    assertValue(cursor, fin)
+    assertValue(refined, fin.a)
+    assertValue(doubleRefined, fin.a.b)
+  })
+
+  it(`refines using a collection`, () => {
+    const initial = {a: [{b: rand()}, {b: rand()}]}
+    const cursor = CursorSubject.create(initial)
+    const refined = cursor.refine(`a[0]`)
+    const otherRefined = cursor.refine(`a[1]`)
+    const doubleRefined = refined.refine(`b`)
+
+    assertValue(refined, initial.a[0])
+    assertValue(doubleRefined, initial.a[0].b)
+
+    const next = rand()
+
+    doubleRefined.next(next)
+
+    assertValue(refined, {b: next})
+    assertValue(doubleRefined, next)
+    assertValue(otherRefined, initial.a[1])
+  })
+
+  it(`refines over a collection`, done => {
+    const initial = {a: [{b: rand()}, {b: rand()}]}
+    const cursor = CursorSubject.create(initial)
+    const refined = cursor.refine(`a`)
+    let checkedInnerCursors = 0
+
+    const refinedCol = refined.refineCollection((cur, i) => {
+      assertValue(cur, initial.a[i], () => checkedInnerCursors++)
+      return cur
     })
 
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, last.a)
-    })
-
-    doubleRefined.take(1).subscribe(val => {
-      assert.deepEqual(val, 3)
-    })
-
-    doubleRefined.next(4)
-
-    cursor.take(1).subscribe(val => {
-      assert.deepEqual(val, {a: {b: 4}})
-    })
-
-    refined.take(1).subscribe(val => {
-      assert.deepEqual(val, {b: 4})
-    })
-
-    doubleRefined.take(1).subscribe(val => {
-      assert.deepEqual(val, 4)
+    assertValue(refinedCol, initial.a, () => {
+      assert.equal(checkedInnerCursors, initial.a.length)
+      done()
     })
   })
 })
